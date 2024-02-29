@@ -1,3 +1,4 @@
+mod camera;
 mod ecs;
 
 use ecs::Component::*;
@@ -10,6 +11,8 @@ use ggez::event::{self, EventHandler};
 use ggez::graphics::{self, Color, DrawParam};
 use ggez::{Context, ContextBuilder, GameResult};
 use rapier2d::prelude::*;
+
+use crate::camera::*;
 
 pub(crate) type Entity = Vec<Component>;
 
@@ -61,7 +64,6 @@ impl PhysicsWrapper {
 }
 
 struct Platformer {
-    camera: Camera,
     entities: HashMap<String, Vec<Component>>,
 }
 
@@ -111,54 +113,17 @@ impl Platformer {
             collider_set,
         };
 
+        let camera = Camera([0.0, 0.0].into(), [1920.0 / 25.0, 1080.0 / 25.0].into());
+
         let mut entities = HashMap::new();
         entities.insert("physics".into(), vec![Physics(Box::new(physics))]);
         entities.insert(
             "player".into(),
             vec![PlayerTag, BallCollider(ball_body_handle)],
         );
+        entities.insert("camera".into(), vec![CameraTag, camera]);
 
-        Platformer {
-            camera: Camera::new([0.0, 0.0], [1920.0 / 25.0, 1080.0 / 25.0]),
-            entities,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-struct Camera {
-    world_top_left: Point<f32>,
-    world_size: Vector<f32>,
-}
-impl Camera {
-    pub fn new(top_left: impl Into<Point<f32>>, size: impl Into<Vector<f32>>) -> Self {
-        Self {
-            world_top_left: top_left.into(),
-            world_size: size.into(),
-        }
-    }
-
-    pub fn world_to_screen_point(
-        &self,
-        point: impl Into<Point<f32>>,
-        screen_top_left: impl Into<Point<f32>>,
-        screen_size: impl Into<Vector<f32>>,
-    ) -> Point<f32> {
-        screen_top_left.into()
-            + (point.into() - self.world_top_left)
-                .component_mul(&screen_size.into())
-                .component_div(&self.world_size)
-    }
-
-    pub fn world_to_screen_offset(
-        &self,
-        offset: impl Into<Vector<f32>>,
-        screen_size: impl Into<Vector<f32>>,
-    ) -> Vector<f32> {
-        offset
-            .into()
-            .component_mul(&screen_size.into())
-            .component_div(&self.world_size)
+        Platformer { entities }
     }
 }
 
@@ -193,7 +158,8 @@ impl EventHandler for Platformer {
         let mut canvas = graphics::Canvas::from_frame(ctx, Color::BLACK);
         get_entity! { self.entities,
             let [PlayerTag, BallCollider(player_ball_handle), ..] = get "player";
-            let [Physics(ref mut physics), ..] = get_mut "physics";
+            let [Physics(ref physics), ..] = get "physics";
+            let [CameraTag, Camera(camera_position, camera_size)] = get "camera";
         }
 
         canvas.set_screen_coordinates(graphics::Rect {
@@ -207,18 +173,18 @@ impl EventHandler for Platformer {
             &graphics::Quad,
             DrawParam::default()
                 .dest(
-                    self.camera
-                        .world_to_screen_point(
-                            *physics.rigid_body_set[player_ball_handle].translation()
-                                - vector![0.5, 0.5],
-                            [0.0, 0.0],
-                            [1920.0, 1080.0],
-                        )
-                        .into_array(),
+                    world_to_screen_point(
+                        *physics.rigid_body_set[player_ball_handle].translation()
+                            - vector![0.5, 0.5],
+                        camera_position,
+                        camera_size,
+                        [0.0, 0.0],
+                        [1920.0, 1080.0],
+                    )
+                    .into_array(),
                 )
                 .scale(
-                    self.camera
-                        .world_to_screen_offset([0.5 * 2.0, 0.5 * 2.0], [1920.0, 1080.0])
+                    world_to_screen_offset([0.5 * 2.0, 0.5 * 2.0], camera_size, [1920.0, 1080.0])
                         .into_array(),
                 )
                 .color(Color::from_rgb(200, 200, 200)),
