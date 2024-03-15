@@ -1,5 +1,6 @@
 mod camera;
 mod ecs;
+mod input;
 
 use ecs::Component::*;
 use ecs::*;
@@ -122,12 +123,29 @@ impl Platformer {
             vec![PlayerTag, BallCollider(ball_body_handle)],
         );
         entities.insert("camera".into(), vec![CameraTag, camera]);
+        entities.insert("keymap".into(), vec![Keymap(HashMap::new())]);
 
         Platformer { entities }
     }
 }
 
 macro_rules! get_entity {
+    ($entities:expr, $(let $pattern:ident = $getter:ident $name:expr$(;)?)*) => {
+        $(let $pattern = $entities.$getter($name).unwrap() else {
+            return Err(CustomError(format!(
+                "Can't find the {name} component!",
+                name = $name
+            )));
+        };)*
+    };
+    ($(let $pattern:ident = $entity:expr$(;)?)*) => {
+        $(let $pattern = $entity else {
+            return Err(CustomError(
+                "Can't destructure this entity!".into()
+            ));
+        };)*
+    };
+
     ($entities:expr, $(let $pattern:pat = $getter:ident $name:expr$(;)?)*) => {
         $(let $pattern = $entities.$getter($name).unwrap()[..] else {
             return Err(CustomError(format!(
@@ -149,7 +167,13 @@ impl EventHandler for Platformer {
     fn update(&mut self, ctx: &mut Context) -> GameResult {
         const DESIRED_FPS: u32 = 120;
         while ctx.time.check_update_time(DESIRED_FPS) {
-            update_physics(self.entities.get_mut("physics").unwrap()).unwrap();
+            get_entity! { self.entities,
+                let player = get_mut "player";
+                let physics = get_mut "physics";
+                let keys = get "keys";
+            };
+            player_controller(keys, player, physics).unwrap();
+            update_physics(physics).unwrap();
         }
         Ok(())
     }
@@ -192,6 +216,35 @@ impl EventHandler for Platformer {
 
         canvas.finish(ctx)
     }
+
+    fn key_down_event(
+        &mut self,
+        ctx: &mut Context,
+        input: ggez::input::keyboard::KeyInput,
+        _repeated: bool,
+    ) -> Result<(), ggez::GameError> {
+        if let Some(keycode) = input.keycode {
+            get_entity! {self.entities,
+                let [Keymap(ref mut map)] = get_mut "keymap";
+            }
+            map.insert(keycode, true);
+        }
+        Ok(())
+    }
+
+    fn key_up_event(
+        &mut self,
+        _ctx: &mut Context,
+        input: ggez::input::keyboard::KeyInput,
+    ) -> Result<(), ggez::GameError> {
+        if let Some(keycode) = input.keycode {
+            get_entity! {self.entities,
+                let [Keymap(ref mut map)] = get_mut "keymap";
+            }
+            map.insert(keycode, false);
+        }
+        Ok(())
+    }
 }
 
 trait IntoArray<const N: usize> {
@@ -211,5 +264,19 @@ impl IntoArray<2> for Point<f32> {
 fn update_physics(physics: &mut Vec<Component>) -> GameResult {
     get_entity!(let [Component::Physics(ref mut physics)] = physics);
     physics.as_mut().update_physics_pipeline();
+    Ok(())
+}
+
+fn player_controller(
+    keymap: &Vec<Component>,
+    player: &mut Vec<Component>,
+    physics: &mut Vec<Component>,
+) -> GameResult {
+    get_entity! {
+        let [Component::Physics(ref mut physics)] = physics;
+        let [PlayerTag, BallCollider(ball_body_handle)] = player;
+        let [Keymap(ref keys)] = keymap;
+    };
+    dbg!("Working!");
     Ok(())
 }
